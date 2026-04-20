@@ -43,8 +43,8 @@ async function loadFromIDB() {
   catch(e) { return null; }
 }
 
-const SAVE_FIELDS = ["level","xp","stats","done","doneEx","doneW","doneLessons","totalXp","qC","streak","wLog","socialLog","weightLog","bookTitle","bookPages","bookRead","bookLog","muscleXp","lastDailyReset","lastWeeklyReset","penaltyLog","dailyLessonDone","liftLog"];
-const DEFAULT_STATE = {level:1,xp:0,stats:{STR:5,VIT:3,AGI:3,INT:2,PER:2},done:[],doneEx:[],doneW:[],doneLessons:[],totalXp:0,qC:0,streak:0,wLog:[],socialLog:[],weightLog:[{date:"Start",weight:115,fat:null,muscle:null}],bookTitle:"",bookPages:0,bookRead:0,bookLog:[],muscleXp:{chest:0,back:0,shoulders:0,biceps:0,triceps:0,quads:0,hamstrings:0,glutes:0,calves:0,core:0,cardio:0},lastDailyReset:null,lastWeeklyReset:null,penaltyLog:[],dailyLessonDone:false,liftLog:{}};
+const SAVE_FIELDS = ["level","xp","stats","done","doneEx","doneW","doneLessons","totalXp","qC","streak","wLog","socialLog","weightLog","bookTitle","bookPages","bookRead","bookLog","muscleXp","lastDailyReset","lastWeeklyReset","penaltyLog","dailyLessonDone","liftLog","vacation"];
+const DEFAULT_STATE = {level:1,xp:0,stats:{STR:5,VIT:3,AGI:3,INT:2,PER:2},done:[],doneEx:[],doneW:[],doneLessons:[],totalXp:0,qC:0,streak:0,wLog:[],socialLog:[],weightLog:[{date:"Start",weight:115,fat:null,muscle:null}],bookTitle:"",bookPages:0,bookRead:0,bookLog:[],muscleXp:{chest:0,back:0,shoulders:0,biceps:0,triceps:0,quads:0,hamstrings:0,glutes:0,calves:0,core:0,cardio:0},lastDailyReset:null,lastWeeklyReset:null,penaltyLog:[],dailyLessonDone:false,liftLog:{},vacation:false};
 
 // ─── CONSTANTS ───
 const RANKS = [
@@ -390,7 +390,7 @@ function App(){
   const LEARNING_PENALTY = 45;
 
   // Convenience aliases from game state
-  const level=S.level,xp=S.xp,stats=S.stats,done=S.done,doneEx=S.doneEx,doneW=S.doneW,doneLessons=S.doneLessons,totalXp=S.totalXp,qC=S.qC,streak=S.streak,wLog=S.wLog,socialLog=S.socialLog,weightLog=S.weightLog,bookTitle=S.bookTitle,bookPages=S.bookPages,bookRead=S.bookRead,bookLog=S.bookLog,muscleXp=S.muscleXp,lastDailyReset=S.lastDailyReset,lastWeeklyReset=S.lastWeeklyReset,penaltyLog=S.penaltyLog,dailyLessonDone=S.dailyLessonDone,liftLog=S.liftLog;
+  const level=S.level,xp=S.xp,stats=S.stats,done=S.done,doneEx=S.doneEx,doneW=S.doneW,doneLessons=S.doneLessons,totalXp=S.totalXp,qC=S.qC,streak=S.streak,wLog=S.wLog,socialLog=S.socialLog,weightLog=S.weightLog,bookTitle=S.bookTitle,bookPages=S.bookPages,bookRead=S.bookRead,bookLog=S.bookLog,muscleXp=S.muscleXp,lastDailyReset=S.lastDailyReset,lastWeeklyReset=S.lastWeeklyReset,penaltyLog=S.penaltyLog,dailyLessonDone=S.dailyLessonDone,liftLog=S.liftLog,vacation=S.vacation;
 
   // Load saved data from IndexedDB on mount, then run resets
   useEffect(()=>{
@@ -406,18 +406,32 @@ function App(){
       const S = g.current;
       const today = new Date().toISOString().slice(0,10);
       if(S.lastDailyReset && S.lastDailyReset !== today){
-        let totalPenalty=0,missedCount=0;const details=[];
-        const missedQuests=PENALIZABLE_DAILY.filter(q=>!S.done.includes(q.id));
-        if(missedQuests.length>0){const p=missedQuests.reduce((s,q)=>s+q.xp,0);totalPenalty+=p;missedCount+=missedQuests.length;details.push(`${missedQuests.length} quests (-${p})`);}
-        const yDow=new Date(Date.now()-86400000).getDay();const yPPL=PPL[yDow];
-        if(yPPL&&yPPL.type!=="REST"){const missedEx=yPPL.exercises.filter(ex=>!S.doneEx.includes(ex.name));if(missedEx.length>0){const p=missedEx.length*10;totalPenalty+=p;missedCount+=missedEx.length;details.push(`${missedEx.length} exercises (-${p})`);}}
-        if(!S.dailyLessonDone){totalPenalty+=45;missedCount+=1;details.push(`lesson (-45)`);}
+        // Check if yesterday was a weekend or vacation — no penalties
+        const yesterdayDate = new Date(S.lastDailyReset);
+        const yDay = yesterdayDate.getDay(); // 0=Sun, 6=Sat
+        const wasWeekend = (yDay === 0 || yDay === 6);
+        const wasVacation = S.vacation;
+
         const changes={done:[],doneEx:[],dailyLessonDone:false,lastDailyReset:today};
-        if(totalPenalty>0){
-          const newXp=S.xp-totalPenalty;const newLvl=newXp<0?Math.max(1,S.level-1):S.level;
-          Object.assign(changes,{xp:newXp<0?Math.max(0,getXp(newLvl)+newXp):newXp,level:newLvl,totalXp:Math.max(0,S.totalXp-totalPenalty),penaltyLog:[...S.penaltyLog,{date:S.lastDailyReset,missed:missedCount,penalty:totalPenalty,type:"daily",details:details.join(", ")}]});
-          setTimeout(()=>setNotif(`⚠️ -${totalPenalty} XP! ${details.join(", ")}`),500);
-        } else { changes.streak=S.streak+1; }
+
+        if(wasWeekend || wasVacation){
+          // No penalties on weekends/vacation — just reset tasks, keep streak
+          changes.streak = S.streak + 1;
+          const reason = wasVacation ? "🏖️ Vacation mode — no penalties" : "🌙 Weekend — no penalties";
+          setTimeout(()=>setNotif(reason),500);
+        } else {
+          let totalPenalty=0,missedCount=0;const details=[];
+          const missedQuests=PENALIZABLE_DAILY.filter(q=>!S.done.includes(q.id));
+          if(missedQuests.length>0){const p=missedQuests.reduce((s,q)=>s+q.xp,0);totalPenalty+=p;missedCount+=missedQuests.length;details.push(`${missedQuests.length} quests (-${p})`);}
+          const yDow=new Date(Date.now()-86400000).getDay();const yPPL=PPL[yDow];
+          if(yPPL&&yPPL.type!=="REST"){const missedEx=yPPL.exercises.filter(ex=>!S.doneEx.includes(ex.name));if(missedEx.length>0){const p=missedEx.length*10;totalPenalty+=p;missedCount+=missedEx.length;details.push(`${missedEx.length} exercises (-${p})`);}}
+          if(!S.dailyLessonDone){totalPenalty+=45;missedCount+=1;details.push(`lesson (-45)`);}
+          if(totalPenalty>0){
+            const newXp=S.xp-totalPenalty;const newLvl=newXp<0?Math.max(1,S.level-1):S.level;
+            Object.assign(changes,{xp:newXp<0?Math.max(0,getXp(newLvl)+newXp):newXp,level:newLvl,totalXp:Math.max(0,S.totalXp-totalPenalty),penaltyLog:[...S.penaltyLog,{date:S.lastDailyReset,missed:missedCount,penalty:totalPenalty,type:"daily",details:details.join(", ")}]});
+            setTimeout(()=>setNotif(`⚠️ -${totalPenalty} XP! ${details.join(", ")}`),500);
+          } else { changes.streak=S.streak+1; }
+        }
         Object.assign(g.current, changes);
         await saveToIDB(g.current);
       } else if(!S.lastDailyReset){
@@ -428,13 +442,15 @@ function App(){
       // ─── AUTO WEEKLY RESET + PENALTY ───
       const wkId = getWeekId(new Date());
       if(g.current.lastWeeklyReset && g.current.lastWeeklyReset !== wkId){
-        const missed=WEEKLY_OBJ.filter(q=>!g.current.doneW.includes(q.id));
         const changes={doneW:[],lastWeeklyReset:wkId};
-        if(missed.length>0){
-          const penalty=missed.reduce((s,q)=>s+q.xp,0);
-          const newXp=g.current.xp-penalty;const newLvl=newXp<0?Math.max(1,g.current.level-1):g.current.level;
-          Object.assign(changes,{xp:newXp<0?Math.max(0,getXp(newLvl)+newXp):newXp,level:newLvl,totalXp:Math.max(0,g.current.totalXp-penalty),penaltyLog:[...g.current.penaltyLog,{date:g.current.lastWeeklyReset,missed:missed.length,penalty,type:"weekly"}]});
-          setTimeout(()=>setNotif(`⚠️ -${penalty} XP weekly penalty!`),1500);
+        if(!g.current.vacation){
+          const missed=WEEKLY_OBJ.filter(q=>!g.current.doneW.includes(q.id));
+          if(missed.length>0){
+            const penalty=missed.reduce((s,q)=>s+q.xp,0);
+            const newXp=g.current.xp-penalty;const newLvl=newXp<0?Math.max(1,g.current.level-1):g.current.level;
+            Object.assign(changes,{xp:newXp<0?Math.max(0,getXp(newLvl)+newXp):newXp,level:newLvl,totalXp:Math.max(0,g.current.totalXp-penalty),penaltyLog:[...g.current.penaltyLog,{date:g.current.lastWeeklyReset,missed:missed.length,penalty,type:"weekly"}]});
+            setTimeout(()=>setNotif(`⚠️ -${penalty} XP weekly penalty!`),1500);
+          }
         }
         Object.assign(g.current, changes);
         await saveToIDB(g.current);
@@ -630,6 +646,23 @@ function App(){
         <div style={{display:"flex",gap:2,marginBottom:12,overflowX:"auto",paddingBottom:2}}>
           {tabs.map(t=>(<button key={t.k} onClick={()=>setTab(t.k)} style={{flex:"0 0 auto",padding:"6px 8px",background:tab===t.k?"rgba(59,130,246,.12)":"rgba(255,255,255,.02)",border:tab===t.k?"1px solid rgba(59,130,246,.3)":"1px solid rgba(255,255,255,.05)",borderRadius:6,color:tab===t.k?"#93c5fd":"#475569",fontSize:8,cursor:"pointer",textAlign:"center",minWidth:44}}><div style={{fontSize:14}}>{t.i}</div><div style={{marginTop:1,letterSpacing:.3}}>{t.l}</div></button>))}
         </div>
+
+        {/* VACATION / WEEKEND BANNER */}
+        {vacation&&(
+          <div style={{background:"linear-gradient(135deg,rgba(245,158,11,.1),rgba(245,158,11,.04))",border:"1px solid rgba(245,158,11,.3)",borderRadius:8,padding:"10px 14px",marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div><div style={{fontSize:11,color:"#fbbf24"}}>🏖️ VACATION MODE</div><div style={{fontSize:9,color:"#92400e",marginTop:2}}>Penalties paused · Streak preserved</div></div>
+            <button onClick={()=>{update({vacation:false});setNotif("⚔️ Back to the grind, Hunter!");}} style={{padding:"6px 12px",background:"rgba(34,197,94,.15)",border:"1px solid rgba(34,197,94,.3)",borderRadius:6,color:"#86efac",fontSize:9,cursor:"pointer",fontFamily:"'Courier New',monospace"}}>END</button>
+          </div>
+        )}
+        {!vacation&&(new Date().getDay()===0||new Date().getDay()===6)&&(
+          <div style={{background:"rgba(168,85,247,.06)",border:"1px solid rgba(168,85,247,.15)",borderRadius:8,padding:"8px 14px",marginBottom:10,textAlign:"center"}}>
+            <div style={{fontSize:10,color:"#c084fc"}}>🌙 Weekend — no penalties today</div>
+            <div style={{fontSize:8,color:"#475569",marginTop:2}}>You can still complete tasks for bonus XP</div>
+          </div>
+        )}
+        {!vacation&&!(new Date().getDay()===0||new Date().getDay()===6)&&(
+          <button onClick={()=>{update({vacation:true});setNotif("🏖️ Vacation mode ON — enjoy your rest, Hunter!");}} style={{width:"100%",padding:"6px",marginBottom:10,background:"rgba(245,158,11,.04)",border:"1px solid rgba(245,158,11,.1)",borderRadius:6,color:"#92400e",fontSize:8,cursor:"pointer",fontFamily:"'Courier New',monospace",textAlign:"center"}}>🏖️ Tap to enable vacation mode</button>
+        )}
 
         {/* ===== QUESTS ===== */}
         {tab==="quests"&&(<div>
